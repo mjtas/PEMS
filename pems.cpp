@@ -10,7 +10,6 @@
 #include <iomanip>
 #include <json/json.h> 
 
-// Data structures for the PEMS
 struct SensorData {
     double solar_output;        // kW
     double battery_soc;         // State of Charge (0-100%)
@@ -169,7 +168,6 @@ private:
                 node["name"] = "Node " + std::to_string(i);
                 
                 if (!globalData[i].empty()) {
-                    // Use latest data point for each node
                     const SensorData& latest = globalData[i].back();
                     node["solar_output"] = latest.solar_output;
                     node["battery_soc"] = latest.battery_soc;
@@ -185,7 +183,11 @@ private:
             }
             root["nodes"] = nodes;
             
-            std::cout << "JSON_OUTPUT:" << root << std::endl;
+            // JSON serialisation
+            Json::StreamWriterBuilder builder;
+            builder["indentation"] = "";
+            std::string jsonString = Json::writeString(builder, root);
+            std::cout << "JSON_OUTPUT:" << jsonString << std::endl;
         }
     }
     
@@ -209,7 +211,11 @@ private:
             root["battery_forecast"] = battery;
             root["deficit_risk"] = prediction.energy_deficit_risk;
             
-            std::cout << "JSON_OUTPUT:" << root << std::endl;
+            // JSON serialisation
+            Json::StreamWriterBuilder builder;
+            builder["indentation"] = "";
+            std::string jsonString = Json::writeString(builder, root);
+            std::cout << "JSON_OUTPUT:" << jsonString << std::endl;
         }
     }
     
@@ -231,7 +237,11 @@ private:
             }
             root["actions"] = actions;
             
-            std::cout << "JSON_OUTPUT:" << root << std::endl;
+            // JSON serialisation
+            Json::StreamWriterBuilder builder;
+            builder["indentation"] = "";
+            std::string jsonString = Json::writeString(builder, root);
+            std::cout << "JSON_OUTPUT:" << jsonString << std::endl;
         }
     }
     
@@ -244,14 +254,18 @@ private:
             root["efficiency_percent"] = efficiency;
             root["total_nodes"] = size;
             
-            std::cout << "JSON_OUTPUT:" << root << std::endl;
+            // JSON serialisation
+            Json::StreamWriterBuilder builder;
+            builder["indentation"] = "";
+            std::string jsonString = Json::writeString(builder, root);
+            std::cout << "JSON_OUTPUT:" << jsonString << std::endl;
         }
     }
     
 public:
     PEMS(int r, int s) : rank(r), size(s) {
         dataGen = new DataGenerator(rank * 123 + 456);
-        if(rank == 0) { // Master node has the neural network
+        if(rank == 0) { // Leader node has the neural network
             neuralNet = new SimpleNeuralNetwork();
         }
     }
@@ -263,7 +277,7 @@ public:
     
     // Node-level data collection
     void collectLocalData(std::vector<SensorData>& localData, int hours = 24) {
-        std::cout << "Node " << rank << ": Collecting local sensor data..." << std::endl;
+        std::cerr << "Node " << rank << ": Collecting local sensor data..." << std::endl;
         
         localData.clear();
         for(int h = 0; h < hours; h++) {
@@ -271,18 +285,18 @@ public:
             localData.push_back(data);
         }
         
-        std::cout << "Node " << rank << ": Collected " << localData.size() << " data points" << std::endl;
+        std::cerr << "Node " << rank << ": Collected " << localData.size() << " data points" << std::endl;
     }
     
     // Parallel data aggregation with JSON output
     void aggregateDataParallel(const std::vector<SensorData>& localData, 
                               std::vector<std::vector<SensorData>>& globalData) {
         if(rank == 0) {
-            std::cout << "Master: Starting parallel data aggregation..." << std::endl;
+            std::cerr << "Leader: Starting parallel data aggregation..." << std::endl;
             globalData.resize(size);
         }
         
-        // Gather all node data to master
+        // Gather all node data to leader
         int dataSize = localData.size() * sizeof(SensorData);
         std::vector<int> recvCounts(size, dataSize);
         std::vector<int> displs(size);
@@ -301,12 +315,12 @@ public:
                 globalData[node] = nodeData;
             }
             
-            std::cout << "Master: Data aggregation complete. Total nodes: " << size << std::endl;
+            std::cerr << "Leader: Data aggregation complete. Total nodes: " << size << std::endl;
             
             // Output node data as JSON
             outputNodeDataJSON(globalData);
         } else {
-            // Send local data to master
+            // Send local data to leader
             MPI_Send(const_cast<SensorData*>(localData.data()), dataSize, MPI_BYTE, 0, 0, MPI_COMM_WORLD);
         }
     }
@@ -316,7 +330,7 @@ public:
         PredictionResult result;
         
         if(rank == 0) {
-            std::cout << "Master: Running parallel prediction model..." << std::endl;
+            std::cerr << "Leader: Running parallel prediction model..." << std::endl;
             
             auto start_time = std::chrono::high_resolution_clock::now();
             
@@ -380,8 +394,8 @@ public:
             auto end_time = std::chrono::high_resolution_clock::now();
             auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
             
-            std::cout << "Master: Prediction completed in " << duration.count() << " ms" << std::endl;
-            std::cout << "Master: Energy deficit risk: " << std::fixed << std::setprecision(3) 
+            std::cerr << "Leader: Prediction completed in " << duration.count() << " ms" << std::endl;
+            std::cerr << "Leader: Energy deficit risk: " << std::fixed << std::setprecision(3) 
                       << result.energy_deficit_risk * 100 << "%" << std::endl;
             
             // Output predictions as JSON
@@ -396,7 +410,7 @@ public:
         std::vector<ActionPlan> plans;
         
         if(rank == 0) {
-            std::cout << "Master: Generating optimised action plans..." << std::endl;
+            std::cout << "Leader: Generating optimised action plans..." << std::endl;
             
             plans.resize(size);
             
@@ -429,11 +443,11 @@ public:
                     plan.load_reduction_factor = 1.0; // No reduction
                 }
                 
-                std::cout << "Master: Action plan for Node " << node << ":" << std::endl;
-                std::cout << "  - Delay washing machine: " << (plan.delay_washing_machine ? "Yes" : "No") << std::endl;
-                std::cout << "  - Battery charge rate: " << plan.battery_charge_rate << "%" << std::endl;
-                std::cout << "  - Activate backup gen: " << (plan.activate_backup_generator ? "Yes" : "No") << std::endl;
-                std::cout << "  - Load reduction: " << (1.0 - plan.load_reduction_factor) * 100 << "%" << std::endl;
+                std::cerr << "Leader: Action plan for Node " << node << ":" << std::endl;
+                std::cerr << "  - Delay washing machine: " << (plan.delay_washing_machine ? "Yes" : "No") << std::endl;
+                std::cerr << "  - Battery charge rate: " << plan.battery_charge_rate << "%" << std::endl;
+                std::cerr << "  - Activate backup gen: " << (plan.activate_backup_generator ? "Yes" : "No") << std::endl;
+                std::cerr << "  - Load reduction: " << (1.0 - plan.load_reduction_factor) * 100 << "%" << std::endl;
             }
             
             // Output action plans as JSON
@@ -446,7 +460,7 @@ public:
     // Distribute action plans to nodes
     void distributeActionPlans(const std::vector<ActionPlan>& plans, ActionPlan& myPlan) {
         if(rank == 0) {
-            std::cout << "Master: Distributing action plans to all nodes..." << std::endl;
+            std::cerr << "Leader: Distributing action plans to all nodes..." << std::endl;
             
             // Send plans to other nodes
             for(int node = 1; node < size; node++) {
@@ -454,10 +468,10 @@ public:
                         node, 1, MPI_COMM_WORLD);
             }
             
-            // Master gets its own plan
+            // Leader gets its own plan
             myPlan = plans[0];
         } else {
-            // Receive plan from master
+            // Receive plan from leader
             MPI_Recv(&myPlan, sizeof(ActionPlan), MPI_BYTE, 0, 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
         }
         
@@ -466,43 +480,43 @@ public:
     
     // Execute local actions
     void executeLocalActions(const ActionPlan& plan) {
-        std::cout << "Node " << rank << ": Executing local actions..." << std::endl;
+        std::cerr << "Node " << rank << ": Executing local actions..." << std::endl;
         
         // Simulate appliance control
         if(plan.delay_washing_machine) {
-            std::cout << "Node " << rank << ": Delaying washing machine operation" << std::endl;
+            std::cerr << "Node " << rank << ": Delaying washing machine operation" << std::endl;
         }
         
         if(plan.delay_dishwasher) {
-            std::cout << "Node " << rank << ": Delaying dishwasher operation" << std::endl;
+            std::cerr << "Node " << rank << ": Delaying dishwasher operation" << std::endl;
         }
         
         // Simulate battery management
-        std::cout << "Node " << rank << ": Setting battery charge rate to " 
+        std::cerr << "Node " << rank << ": Setting battery charge rate to " 
                   << plan.battery_charge_rate << "%" << std::endl;
         
         // Simulate backup generator
         if(plan.activate_backup_generator) {
-            std::cout << "Node " << rank << ": Activating backup generator" << std::endl;
+            std::cerr << "Node " << rank << ": Activating backup generator" << std::endl;
         }
         
         // Simulate load reduction
         if(plan.load_reduction_factor < 1.0) {
-            std::cout << "Node " << rank << ": Reducing load by " 
+            std::cerr << "Node " << rank << ": Reducing load by " 
                       << (1.0 - plan.load_reduction_factor) * 100 << "%" << std::endl;
         }
         
-        std::cout << "Node " << rank << ": Local actions executed successfully" << std::endl;
+        std::cerr << "Node " << rank << ": Local actions executed successfully" << std::endl;
     }
     
     // Performance analysis with JSON output
     void performanceAnalysis() {
         if(rank == 0) {
-            std::cout << "\n=== PERFORMANCE ANALYSIS ===" << std::endl;
-            std::cout << "System Configuration:" << std::endl;
-            std::cout << "  - Total nodes: " << size << std::endl;
-            std::cout << "  - Parallel processing: ENABLED" << std::endl;
-            std::cout << "  - Distributed architecture: ENABLED" << std::endl;
+            std::cerr << "\n=== PERFORMANCE ANALYSIS ===" << std::endl;
+            std::cerr << "System Configuration:" << std::endl;
+            std::cerr << "  - Total nodes: " << size << std::endl;
+            std::cerr << "  - Parallel processing: ENABLED" << std::endl;
+            std::cerr << "  - Distributed architecture: ENABLED" << std::endl;
             
             // Simulate speedup calculation
             double sequential_time = 1000.0; // ms (simulated)
@@ -510,11 +524,11 @@ public:
             double speedup = sequential_time / parallel_time;
             double efficiency = (speedup / size) * 100;
             
-            std::cout << "\nPerformance Metrics:" << std::endl;
-            std::cout << "  - Sequential processing time: " << sequential_time << " ms" << std::endl;
-            std::cout << "  - Parallel processing time: " << parallel_time << " ms" << std::endl;
-            std::cout << "  - Speedup factor: " << std::fixed << std::setprecision(2) << speedup << "x" << std::endl;
-            std::cout << "  - Efficiency: " << std::fixed << std::setprecision(1) << efficiency << "%" << std::endl;
+            std::cerr << "\nPerformance Metrics:" << std::endl;
+            std::cerr << "  - Sequential processing time: " << sequential_time << " ms" << std::endl;
+            std::cerr << "  - Parallel processing time: " << parallel_time << " ms" << std::endl;
+            std::cerr << "  - Speedup factor: " << std::fixed << std::setprecision(2) << speedup << "x" << std::endl;
+            std::cerr << "  - Efficiency: " << std::fixed << std::setprecision(1) << efficiency << "%" << std::endl;
             
             // Output performance data as JSON
             outputPerformanceJSON(parallel_time, speedup, efficiency);
@@ -531,8 +545,8 @@ int main(int argc, char** argv) {
     MPI_Comm_size(MPI_COMM_WORLD, &size);
     
     if(rank == 0) {
-        std::cout << "=== PREDICTIVE ENERGY MANAGEMENT SYSTEM (PEMS) ===" << std::endl;
-        std::cout << "Initialising distributed system with " << size << " nodes..." << std::endl;
+        std::cerr << "=== PREDICTIVE ENERGY MANAGEMENT SYSTEM (PEMS) ===" << std::endl;
+        std::cerr << "Initialising distributed system with " << size << " nodes..." << std::endl;
     }
     
     // Create PEMS instance
@@ -581,9 +595,9 @@ int main(int argc, char** argv) {
         pems.performanceAnalysis();
         
         if(rank == 0) {
-            std::cout << "\n=== SYSTEM SIMULATION COMPLETE ===" << std::endl;
-            std::cout << "All nodes have successfully executed their action plans." << std::endl;
-            std::cout << "The system is now optimised for the next 24-hour period." << std::endl;
+            std::cerr << "\n=== SYSTEM SIMULATION COMPLETE ===" << std::endl;
+            std::cerr << "All nodes have successfully executed their action plans." << std::endl;
+            std::cerr << "The system is now optimised for the next 24-hour period." << std::endl;
         }
         
     } catch(const std::exception& e) {

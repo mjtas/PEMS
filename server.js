@@ -235,7 +235,7 @@ function sendCommandToMPI(command) {
 
 // Parse JSON output from C++ MPI process
 function parseJSONOutput(output) {
-    const lines = output.split('\\n');
+    const lines = output.split('\n');
     
     for (const line of lines) {
         if (line.startsWith('JSON_OUTPUT:')) {
@@ -256,12 +256,12 @@ function parseJSONOutput(output) {
                             consumption: data.consumption,
                             battery: data.battery
                         };
-                        addLog('INFO', `Predictions updated, deficit risk: \${(data.deficit_risk * 100).toFixed(1)}%`);
+                        addLog('INFO', `Predictions updated, deficit risk: ${(data.deficit_risk * 100).toFixed(1)}%`);
                         broadcast({ type: 'predictions', data: pemsState.predictions });
                         break;
                         
                     case 'action_plans':
-                        addLog('INFO', `Action plans distributed to \${data.actions.length} nodes`);
+                        addLog('INFO', `Action plans distributed to ${data.actions.length} nodes`);
                         broadcast({ type: 'actions', data: data.actions });
                         break;
                         
